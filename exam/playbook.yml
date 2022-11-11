@@ -1,0 +1,211 @@
+---
+- name:  Setup Server
+  hosts: slave
+  remote_user: ubuntu
+  become: true
+  become_method: sudo
+  tasks:
+  - name: Update Repository
+    apt:
+      update_cache: true
+      cache_valid_time: 3600
+      force_apt_get: true
+  - name: Install software packeges
+    apt:
+      name: software-properties-common
+  - name: Install Apache Server
+    apt:
+      name: apache2
+      state: present
+  - name: All Apache Firewall
+    ufw:
+      state: enabled
+      policy: allow
+  - name: Allow port 80
+    ufw:
+      rule: allow
+      port: '80'
+  - name: Allow port 443
+    ufw:
+      rule: allow
+      port: '443'
+  - name: Install Git
+    apt:
+      name: git
+      state: present
+      update_cache: yes
+  - name: Enable Apache2
+    command: systemctl enable apache2
+  - name: Start Apache2
+    command: systemctl status apache2
+  - name: Create App Directory
+    git:
+      repo: https://github.com/f1amy/laravel-realworld-example-app.git
+      dest: /var/www/danasterisk.me
+      update: yes
+    ignore_errors: true
+  - name: Updating the Repo
+    apt:
+      update_cache: yes
+  - name: Install Latest PHP
+    apt:
+      name: php8.1
+      state: present
+  - name: Install php extensions
+    apt:
+      pkg:
+        - php-common
+        - php-cli
+        - php-curl
+        - php-xml
+        - php-gd
+        - php-mbstring
+        - php-opcache
+        - libapache2-mod-php
+        - php-zip
+        - php-json
+        - php-tokenizer
+        - php-bcmath
+        - php-intl
+        - php-soap
+        - php-xmlrpc
+        - php-xsl
+        - php-cgi
+        - php-mysql
+      state: present
+      update_cache: yes
+  - name: Install Curl
+    apt:
+      name: curl
+  - name: Install Composer
+    shell: curl -sS https://getcomposer.org/installer -o /tmp/composer-setup.php && sudo php /tmp/composer-setup.php --install-dir=/usr/local/bin --filename=composer
+  - name: Update depend
+    shell: composer update --no-interaction && composer update friendsofphp/php-cs-fixer --no-interaction && composer create-project --no-interaction
+    args:
+      chdir: /var/www/danasterisk.me
+  - name: INstal mysql-server
+    apt:
+      name: mysql-server
+      update_cache: yes
+      state: latest
+  - name: install required  package
+    apt:
+      name: python3-pymysql
+      update_cache: yes
+      state: latest
+  - name: Update app mode
+    file:
+      path: /var/www/danasterisk.me
+      state: directory
+      owner: ubuntu
+      mode: "0775"
+  - name: Update app bootstrap mode
+    file:
+      path: /var/www/danasterisk.me/bootstrap/cache
+      state: directory
+      owner: ubuntu
+      mode: "0775"
+  - name: Change owner of folders
+    shell: |
+      chown -R ubuntu:www-data /var/www/danasterisk.me
+      chown -R ubuntu:www-data /var/www/danasterisk.me/storage
+      chown -R ubuntu:www-data /var/www/danasterisk.me/bootstrap/cache
+      sudo chmod -R 775  /var/www/danasterisk.me
+      sudo chmod -R 775  /var/www/danasterisk.me/bootstrap/cache
+      sudo chmod -R 775  /var/www/danasterisk.me/storage
+  - name: add virtualhost
+    copy:
+      src: ./virtualhost.conf.j2
+      dest: /etc/apache2/sites-available/danasterisk.me.conf
+    notify: Reload Apache
+  - name: Enable new site
+    shell: /usr/sbin/a2ensite  danasterisk.me.conf
+    notify: Reload Apache
+  - name: Disable default Apache site
+    shell: /usr/sbin/a2dissite 000-default.conf
+    notify: Reload Apache
+  - name: Remove Default Conf
+    file:
+      path: /etc/apache2/sites-enabled/000-default.conf
+      state: absent
+  - name: enable rewrite
+    shell: a2enmod rewrite
+    become: yes
+  - name: Set MySql Password
+    mysql_user:
+      name: ansible
+      password: 1234567890poiuytrewq#
+      login_unix_socket: /var/run/mysqld/mysqld.sock
+    no_log: true
+  - name: Remove anonymous user accounts
+    mysql_user:
+      name: ''
+      host_all: yes
+      state: absent
+      login_unix_socket: /var/run/mysqld/mysqld.sock
+    no_log: true
+  - name: Remove the MySQL test db
+    mysql_db:
+      name: test
+      state: absent
+      login_unix_socket: /var/run/mysqld/mysqld.sock
+  - name: Create App Database
+    mysql_db:
+      name: danasterisk_db
+      state: present
+      login_unix_socket: /var/run/mysqld/mysqld.sock
+  - name: Create user with grants access
+    mysql_user:
+      name: danasterisk
+      password: 1234567890
+      priv: "danasterisk_db.*:ALL"
+      state: present
+      login_unix_socket: /var/run/mysqld/mysqld.sock
+    no_log: true
+  - name: Create Postgre installer
+    template:
+      src: ./postgres-installer.sh.j2
+      dest: ~/postgres-installer.sh
+      mode: "0777"
+  - name: Run Installer
+    shell:
+      cmd: ~/postgres-installer.sh
+  - name: Set .env file
+    template:
+      src: ./.env.j2
+      dest: /var/www/danasterisk.me/.env
+  - name: Installing Laravel dependencies
+    command: sudo  composer install --no-interaction --working-dir=/var/www/danasterisk.me
+    become: false
+  - name: Generate app key
+    command: "/usr/bin/php /var/www/danasterisk.me/artisan key:generate"
+    tags: [ 'laravel', 'artisan:key' ]
+  - name: Set up app storage link at slave
+    command: "/usr/bin/php /var/www/danasterisk.me/artisan storage:link"
+    tags: [ 'laravel', 'artisan:storage' ]
+  - name: Clear App Cache Data
+    command: "/usr/bin/php /var/www/danasterisk.me/artisan cache:clear"
+    tags: [ 'laravel', 'artisan:cache' ]
+  - name: clear App config
+    command: "/usr/bin/php /var/www/danasterisk.me/artisan config:clear"
+    tags: [ 'laravel', 'artisan:config' ]
+  - name: Run Migrations and  Seeders
+    command: "/usr/bin/php /var/www/danasterisk.me/artisan migrate:fresh --seed --force"
+    tags: [ 'laravel', 'artisan:migrate' ]
+    ignore_errors:  yes
+  - name: Install Cert Bot
+    apt:
+      name: python3-certbot-apache
+  - name: Issue SSL
+    command: certbot --apache -d danasterisk.me
+
+  handlers:
+    - name: Reload Apache
+      service:
+        name: apache2
+        state: reloaded
+
+    - name: Restart Apache
+      service:
+        name: apache2
+        state: restarted

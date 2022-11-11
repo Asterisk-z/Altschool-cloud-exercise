@@ -1,0 +1,15 @@
+<VirtualHost *:80>
+	ServerAdmin olangdan17@gmail.com
+	ServerName danasterisk.me
+	ServerAlias www.danasterisk.me
+	DocumentRoot /var/www/danasterisk.me/public
+	<Directory /var/www/danasterisk.me>
+		Options Indexes FollowSymLinks MultiViews
+		AllowOverride All
+		allow from all
+		Order allow,deny
+		Require all granted
+	</Directory>
+	ErrorLog ${APACHE_LOG_DIR}/error.log
+	CustomLog ${APACHE_LOG_DIR}/access.log combined
+</VirtualHost>
